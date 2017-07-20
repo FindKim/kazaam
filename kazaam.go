@@ -259,3 +259,69 @@ func (k *Kazaam) TransformJSONString(data string) ([]byte, error) {
 	}
 	return d, err
 }
+
+type KData []byte
+
+func (d *KData) Transform(k *Kazaam) error {
+	return d.TransformInPlace(k)
+}
+
+func (d *KData) String() string {
+	if len(*d) == 0 {
+		return ""
+	}
+	return string(*d)
+}
+
+func (d *KData) TransformInPlace(k *Kazaam) error {
+	if k == nil || k.specJSON == nil {
+		return &Error{ErrMsg: "Kazaam not properly initialized", ErrType: SpecError}
+	}
+	if len(*d) == 0 {
+		return nil
+	}
+
+	var err error
+	for _, specObj := range k.specJSON {
+		if specObj.Config != nil && specObj.Over != nil {
+			var transformedDataList [][]byte
+			_, err = jsonparser.ArrayEach(*d, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+				transformedDataList = append(transformedDataList, value)
+			}, strings.Split(*specObj.Over, ".")...)
+			if err != nil {
+				return transformErrorType(err)
+			}
+			for i, value := range transformedDataList {
+				x := make([]byte, len(value))
+				copy(x, value)
+				x, intErr := k.getTransform(&specObj)(specObj.Config, x)
+				if intErr != nil {
+					return transformErrorType(err)
+				}
+				transformedDataList[i] = x
+			}
+			// copy into raw []byte format and return
+			var buffer bytes.Buffer
+			buffer.WriteByte('[')
+			for i := 0; i < len(transformedDataList)-1; i++ {
+				buffer.Write(transformedDataList[i])
+				buffer.WriteByte(',')
+			}
+			if len(transformedDataList) > 0 {
+				buffer.Write(transformedDataList[len(transformedDataList)-1])
+			}
+			buffer.WriteByte(']')
+			*d, err = jsonparser.Set(*d, buffer.Bytes(), strings.Split(*specObj.Over, ".")...)
+			if err != nil {
+				return transformErrorType(err)
+			}
+
+		} else {
+			*d, err = k.getTransform(&specObj)(specObj.Config, *d)
+			if err != nil {
+				return transformErrorType(err)
+			}
+		}
+	}
+	return transformErrorType(err)
+}
